@@ -138,6 +138,20 @@ func (l *Locker) manageMutexesForever() {
 
 func (l *Locker) consumerFunc() func(ctx context.Context, fate fate.Fate, event *reflex.Event) error {
 	return func(ctx context.Context, fate fate.Fate, event *reflex.Event) error {
+		switch goku.EventType(event.Type.ReflexType()) {
+		case goku.EventTypeSet:
+			fmt.Println("set event")
+		case goku.EventTypeDelete:
+			fmt.Println("delete event")
+		case goku.EventTypeExpire:
+			fmt.Println("expire event")
+		default:
+			// skip unknown events
+			fmt.Println("unknown event")
+			fmt.Println(event.Type)
+			return nil
+		}
+
 		id := l.parseReflexForeignID(event.ForeignID)
 		mutex, exists := l.pool[id]
 		if !exists {
