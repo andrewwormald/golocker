@@ -21,11 +21,10 @@ func TestLocker(t *testing.T) {
 
 	locker := golocker.New(ctx, "mylocker", dbc, cl)
 	go locker.SyncForever()
-	go db.ExpireLeasesForever(dbc)
 
 	var testVariable string
 	var wg sync.WaitGroup
-	wg.Add(1000)
+	wg.Add(2000)
 
 	mu := locker.NewMutex("testmutex", time.Minute * 2)
 	for i := 0; i < 2000; i++ {

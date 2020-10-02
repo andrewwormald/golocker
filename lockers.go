@@ -65,6 +65,7 @@ func (l *Locker) NewMutex(distributedIdentifier string, autoExpireLockAfter time
 func (l *Locker) SyncForever() {
 	go l.processLockRequestsForever()
 	go l.processReleaseLockRequestsForever()
+	go db.ExpireLeasesForever(l.dbc)
 
 	l.manageMutexesForever()
 }
@@ -139,7 +140,9 @@ func (l *Locker) consumerFunc() func(ctx context.Context, fate fate.Fate, event 
 		switch goku.EventType(event.Type.ReflexType()) {
 		case goku.EventTypeSet:
 			kv, err := l.goku.Get(l.ctx, l.keyForMutex(mutex))
-			if err != nil {
+			if errors.Is(err, goku.ErrNotFound) {
+				// continue
+			} else if err != nil {
 				return err
 			}
 
