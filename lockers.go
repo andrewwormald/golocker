@@ -3,6 +3,7 @@ package golocker
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -79,6 +80,7 @@ func (l *Locker) processReleaseLockRequestsForever() {
 			err := l.goku.ExpireLease(l.ctx, leaseID)
 			if errors.IsAny(err, goku.ErrLeaseNotFound) {
 				// continue
+				fmt.Println("cannot find lease")
 			} else if err != nil {
 				// log error and retry the request
 				log.Error(l.ctx, err)
