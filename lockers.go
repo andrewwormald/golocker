@@ -81,12 +81,15 @@ func (l *Locker) processReleaseLockRequestsForever() {
 			if errors.IsAny(err, goku.ErrLeaseNotFound) {
 				// continue
 				fmt.Println("cannot find lease")
+				continue
 			} else if err != nil {
 				// log error and retry the request
 				log.Error(l.ctx, err)
 				l.releaseLockRequests <- leaseID
 				continue
 			}
+			fmt.Println("expired lease without issues")
+			db.FillGaps(l.dbc)
 		default:
 			continue
 		}
@@ -113,6 +116,7 @@ func (l *Locker) processLockRequestsForever() {
 				log.Error(l.ctx, err)
 				mu.lockAcquireFailed <- struct{}{}
 			}
+			db.FillGaps(l.dbc)
 		default:
 
 			continue
