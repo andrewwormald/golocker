@@ -2,31 +2,31 @@ package golocker
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 )
 
 type Mutex struct {
-	ctx     context.Context
-	uid     string
-	leaseID int64
-	state   MutexState
+	ctx                   context.Context
+	distributedIdentifier string // used to sync mutexes across goroutines and hosts
+	leaseID               int64
+
+	mu    sync.Mutex
+	state MutexState // potentially remove as it seems useless and potential data race if not looked after
 
 	lockAcquired      chan int64 // lease id returned once lock acquired
 	lockAcquireFailed chan struct{}
 	lockFreed         chan struct{}
 
-	backoff      time.Duration
-	lockDuration time.Duration
+	autoExpireLockAfter time.Duration
 
-	requestLock    chan<- string // parent locker's lock request channel
+	requestLock   chan<- string // parent locker's lock request channel
 	requestUnlock chan<- int64  // parent locker's release request channel
 }
 
 func (m *Mutex) Lock() {
 	// pass request to locker
-	m.requestLock <- m.uid
+	m.requestLock <- m.distributedIdentifier
 
 	// wait for feedback from locker
 	for {
@@ -36,12 +36,12 @@ func (m *Mutex) Lock() {
 			return
 		case <-m.lockAcquireFailed:
 			// sleep and send new request to locker
-			fmt.Println("failed")
-			m.requestLock <- m.uid
+			m.requestLock <- m.distributedIdentifier
 		case leaseID := <-m.lockAcquired:
 			// lock acquired, end blocking pattern
-			fmt.Println("locked")
+			m.mu.Lock()
 			m.state = MutexLocked
+			m.mu.Unlock()
 			m.leaseID = leaseID
 			return
 		default:
@@ -60,7 +60,9 @@ func (m *Mutex) Unlock() {
 			return
 		case <-m.lockFreed:
 			// lock freed, end blocking pattern
+			m.mu.Lock()
 			m.state = MutexUnlocked
+			m.mu.Unlock()
 			return
 		default:
 			continue

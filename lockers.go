@@ -3,6 +3,7 @@ package golocker
 import (
 	"context"
 	"database/sql"
+	"strings"
 	"sync"
 	"time"
 
@@ -13,7 +14,6 @@ import (
 	"github.com/luno/jettison/log"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rpatterns"
-	"github.com/pborman/uuid"
 )
 
 type Locker struct {
@@ -42,22 +42,21 @@ func New(ctx context.Context, globalName string, dbc *sql.DB, gcl goku.Client) *
 	}
 }
 
-func (l *Locker) NewMutex(backoff, maxLockDuration time.Duration) *Mutex {
+func (l *Locker) NewMutex(distributedIdentifier string, autoExpireLockAfter time.Duration) *Mutex {
 	mutex := &Mutex{
-		ctx:               l.ctx,
-		uid:               uuid.New(),
-		lockAcquired:      make(chan int64),
-		lockAcquireFailed: make(chan struct{}),
-		lockFreed:         make(chan struct{}),
-		backoff:           backoff,
-		lockDuration:      maxLockDuration,
-		requestLock:       l.lockRequests,
-		requestUnlock:     l.releaseLockRequests,
+		ctx:                   l.ctx,
+		distributedIdentifier: distributedIdentifier,
+		lockAcquired:          make(chan int64),
+		lockAcquireFailed:     make(chan struct{}),
+		lockFreed:             make(chan struct{}),
+		autoExpireLockAfter:   autoExpireLockAfter,
+		requestLock:           l.lockRequests,
+		requestUnlock:         l.releaseLockRequests,
 	}
 
 	// NOTE: Small chance of uuid generating a key twice
 	l.mu.Lock()
-	l.pool[mutex.uid] = mutex
+	l.pool[mutex.distributedIdentifier] = mutex
 	l.mu.Unlock()
 
 	return mutex
@@ -110,6 +109,7 @@ func (l *Locker) processLockRequestsForever() {
 				mu.lockAcquireFailed <- struct{}{}
 			}
 		default:
+
 			continue
 		}
 	}
@@ -129,13 +129,14 @@ func (l *Locker) manageMutexesForever() {
 
 func (l *Locker) consumerFunc() func(ctx context.Context, fate fate.Fate, event *reflex.Event) error {
 	return func(ctx context.Context, fate fate.Fate, event *reflex.Event) error {
-		mutex, exists := l.pool[event.ForeignID]
+		id := l.parseReflexForeignID(event.ForeignID)
+		mutex, exists := l.pool[id]
 		if !exists {
 			// Must exist in another instance either in the same binary or another host
 			return nil
 		}
 
-		switch event.Type {
+		switch goku.EventType(event.Type.ReflexType()) {
 		case goku.EventTypeSet:
 			kv, err := l.goku.Get(l.ctx, l.keyForMutex(mutex))
 			if err != nil {
@@ -188,9 +189,15 @@ func (l *Locker) setLock(mu *Mutex) error {
 		key,
 		[]byte(nil),
 		goku.WithPrevVersion(kv.Version),
-		goku.WithExpiresAt(time.Now().Add(mu.lockDuration)))
+		goku.WithExpiresAt(time.Now().Add(mu.autoExpireLockAfter)))
 }
 
 func (l *Locker) keyForMutex(mu *Mutex) string {
-	return "golocker/locks/" + l.name + "/" + mu.uid
+	return "golocker/locks/" + l.name + "/" + mu.distributedIdentifier
+}
+
+func (l *Locker) parseReflexForeignID(foreignID string) string {
+	distributedIdentifier := l.name + "/"
+	segments := strings.Split(foreignID, distributedIdentifier)
+	return segments[1]
 }
