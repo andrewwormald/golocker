@@ -77,7 +77,7 @@ func (l *Locker) processReleaseLockRequestsForever() {
 		case <-l.ctx.Done():
 			return
 		case leaseID := <-l.releaseLockRequests:
-			err := l.goku.ExpireLease(l.ctx, leaseID)
+			err := l.goku.UpdateLease(l.ctx, leaseID, time.Now())
 			if errors.IsAny(err, goku.ErrLeaseNotFound) {
 				// continue
 				fmt.Println("cannot find lease")
@@ -109,7 +109,7 @@ func (l *Locker) processLockRequestsForever() {
 
 			err := l.setLock(mu)
 			if errors.IsAny(err, goku.ErrConditional, goku.ErrUpdateRace, ErrLeaseHasNotExpired) {
-				// retryQ
+				// retry
 				mu.lockAcquireFailed <- struct{}{}
 			} else if err != nil {
 				// log error and notify mutex of failed attempt
