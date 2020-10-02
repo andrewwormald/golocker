@@ -77,7 +77,9 @@ func (l *Locker) processReleaseLockRequestsForever() {
 			return
 		case leaseID := <-l.releaseLockRequests:
 			err := l.goku.ExpireLease(l.ctx, leaseID)
-			if err != nil {
+			if errors.IsAny(err, goku.ErrLeaseNotFound) {
+				// continue
+			} else if err != nil {
 				// log error and retry the request
 				log.Error(l.ctx, err)
 				l.releaseLockRequests <- leaseID
