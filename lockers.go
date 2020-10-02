@@ -3,7 +3,6 @@ package golocker
 import (
 	"context"
 	"database/sql"
-	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -48,8 +47,8 @@ func (l *Locker) NewMutex(distributedIdentifier string, autoExpireLockAfter time
 		ctx:                   l.ctx,
 		distributedIdentifier: distributedIdentifier,
 		lockAcquired:          make(chan int64),
-		lockAcquireFailed:     make(chan struct{}),
-		lockFreed:             make(chan struct{}),
+		lockAcquireFailed:     make(chan struct{}, 10),
+		lockFreed:             make(chan struct{}, 10),
 		autoExpireLockAfter:   autoExpireLockAfter,
 		requestLock:           l.lockRequests,
 		requestUnlock:         l.releaseLockRequests,
@@ -77,10 +76,11 @@ func (l *Locker) processReleaseLockRequestsForever() {
 		case <-l.ctx.Done():
 			return
 		case leaseID := <-l.releaseLockRequests:
-			err := l.goku.UpdateLease(l.ctx, leaseID, time.Now())
-			if errors.IsAny(err, goku.ErrLeaseNotFound) {
+			err := l.goku.ExpireLease(l.ctx, leaseID)
+			if errors.Is(err, goku.ErrUpdateRace) {
+				l.releaseLockRequests <- leaseID
+			} else if errors.Is(err, goku.ErrLeaseNotFound) {
 				// continue
-				fmt.Println("cannot find lease")
 				continue
 			} else if err != nil {
 				// log error and retry the request
@@ -88,8 +88,6 @@ func (l *Locker) processReleaseLockRequestsForever() {
 				l.releaseLockRequests <- leaseID
 				continue
 			}
-			fmt.Println("expired lease without issues")
-			db.FillGaps(l.dbc)
 		default:
 			continue
 		}
@@ -116,9 +114,7 @@ func (l *Locker) processLockRequestsForever() {
 				log.Error(l.ctx, err)
 				mu.lockAcquireFailed <- struct{}{}
 			}
-			db.FillGaps(l.dbc)
 		default:
-
 			continue
 		}
 	}
@@ -138,20 +134,6 @@ func (l *Locker) manageMutexesForever() {
 
 func (l *Locker) consumerFunc() func(ctx context.Context, fate fate.Fate, event *reflex.Event) error {
 	return func(ctx context.Context, fate fate.Fate, event *reflex.Event) error {
-		switch goku.EventType(event.Type.ReflexType()) {
-		case goku.EventTypeSet:
-			fmt.Println("set event")
-		case goku.EventTypeDelete:
-			fmt.Println("delete event")
-		case goku.EventTypeExpire:
-			fmt.Println("expire event")
-		default:
-			// skip unknown events
-			fmt.Println("unknown event")
-			fmt.Println(event.Type)
-			return nil
-		}
-
 		id := l.parseReflexForeignID(event.ForeignID)
 		mutex, exists := l.pool[id]
 		if !exists {
@@ -186,13 +168,12 @@ func (l *Locker) consumerFunc() func(ctx context.Context, fate fate.Fate, event 
 func (l *Locker) setLock(mu *Mutex) error {
 	key := l.keyForMutex(mu)
 	kv, err := l.goku.Get(l.ctx, key)
-	if errors.Is(err, goku.ErrNotFound) {
+	if errors.IsAny(err, goku.ErrNotFound, goku.ErrLeaseNotFound) {
 		// continue
 	} else if err != nil {
 		return err
 	}
 
-	//kv.LeaseID
 	leases, err := db.ListLeasesToExpire(l.ctx, l.dbc, time.Now())
 	if err != nil {
 		return err
