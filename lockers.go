@@ -3,6 +3,7 @@ package golocker
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -47,8 +48,8 @@ func (l *Locker) NewMutex(distributedIdentifier string, autoExpireLockAfter time
 		ctx:                   l.ctx,
 		distributedIdentifier: distributedIdentifier,
 		lockAcquired:          make(chan int64),
-		lockAcquireFailed:     make(chan struct{}, 10),
-		lockFreed:             make(chan struct{}, 10),
+		lockAcquireFailed:     make(chan struct{}),
+		lockFreed:             make(chan struct{}),
 		autoExpireLockAfter:   autoExpireLockAfter,
 		requestLock:           l.lockRequests,
 		requestUnlock:         l.releaseLockRequests,
@@ -108,6 +109,8 @@ func (l *Locker) processLockRequestsForever() {
 			err := l.setLock(mu)
 			if errors.IsAny(err, goku.ErrConditional, goku.ErrUpdateRace, ErrLeaseHasNotExpired) {
 				// retry
+				time.Sleep(time.Second)
+				fmt.Println("retry get lock")
 				mu.lockAcquireFailed <- struct{}{}
 			} else if err != nil {
 				// log error and notify mutex of failed attempt
@@ -123,7 +126,7 @@ func (l *Locker) processLockRequestsForever() {
 func (l *Locker) manageMutexesForever() {
 	fn := l.goku.Stream("golocker/locks/" + l.name)
 	c := reflex.NewConsumer(l.name, l.consumerFunc())
-	spec := reflex.NewSpec(fn, rpatterns.MemCursorStore(), c)
+	spec := reflex.NewSpec(fn, rpatterns.MemCursorStore(), c, reflex.WithStreamFromHead())
 	rpatterns.RunForever(
 		func() context.Context {
 			return l.ctx
@@ -143,6 +146,7 @@ func (l *Locker) consumerFunc() func(ctx context.Context, fate fate.Fate, event 
 
 		switch goku.EventType(event.Type.ReflexType()) {
 		case goku.EventTypeSet:
+			log.Info(l.ctx, "set")
 			kv, err := l.goku.Get(l.ctx, l.keyForMutex(mutex))
 			if errors.Is(err, goku.ErrNotFound) {
 				// continue
@@ -168,7 +172,7 @@ func (l *Locker) consumerFunc() func(ctx context.Context, fate fate.Fate, event 
 func (l *Locker) setLock(mu *Mutex) error {
 	key := l.keyForMutex(mu)
 	kv, err := l.goku.Get(l.ctx, key)
-	if errors.IsAny(err, goku.ErrNotFound, goku.ErrLeaseNotFound) {
+	if errors.IsAny(err, goku.ErrNotFound) {
 		// continue
 	} else if err != nil {
 		return err

@@ -65,15 +65,13 @@ func TestRun(t *testing.T) {
 	db.FillGaps(dbc)
 	go instanceLocker.SyncForever()
 
-	m := instanceLocker.NewMutex("isLeader", time.Second * 6)
+	m := instanceLocker.NewMutex("isLeader", time.Hour)
 	for {
 		log.Info(ctx, "               ")
-		log.Info(ctx, "_______________")
 		log.Info(ctx, "requesting lock")
 		m.Lock()
 		log.Info(ctx, "lock acquired")
-		time.Sleep(time.Second * 5)
 		m.Unlock()
-		log.Info(ctx, "released lock")
+		log.Info(ctx, "lock released")
 	}
 }
