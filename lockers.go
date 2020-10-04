@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -27,66 +26,58 @@ type Locker struct {
 	mu   sync.Mutex
 	pool map[string]*Mutex
 
-	lockRequests        chan string // using the mutex's uid
-	releaseLockRequests chan int64  // using the mutex's lease id
+	lockRequests   chan *Mutex
+	unlockRequests chan *Mutex
 }
 
 func New(ctx context.Context, globalName string, dbc *sql.DB, gcl goku.Client) *Locker {
 	return &Locker{
-		ctx:                 ctx,
-		name:                globalName,
-		dbc:                 dbc,
-		goku:                gcl,
-		pool:                make(map[string]*Mutex),
-		lockRequests:        make(chan string),
-		releaseLockRequests: make(chan int64),
+		ctx:            ctx,
+		name:           globalName,
+		dbc:            dbc,
+		goku:           gcl,
+		pool:           make(map[string]*Mutex),
+		lockRequests:   make(chan *Mutex),
+		unlockRequests: make(chan *Mutex),
 	}
 }
 
 func (l *Locker) NewMutex(distributedIdentifier string, autoExpireLockAfter time.Duration) *Mutex {
-	mutex := &Mutex{
-		ctx:                   l.ctx,
-		distributedIdentifier: distributedIdentifier,
-		lockAcquired:          make(chan int64),
-		lockAcquireFailed:     make(chan struct{}),
-		lockFreed:             make(chan struct{}),
-		autoExpireLockAfter:   autoExpireLockAfter,
-		requestLock:           l.lockRequests,
-		requestUnlock:         l.releaseLockRequests,
-	}
+	mu := newMutex(l.ctx, distributedIdentifier, autoExpireLockAfter, l.lockRequests, l.unlockRequests)
 
-	// NOTE: Small chance of uuid generating a key twice
 	l.mu.Lock()
-	l.pool[mutex.distributedIdentifier] = mutex
+	l.pool[mu.instanceIdentifier] =  mu
 	l.mu.Unlock()
 
-	return mutex
+	return mu
 }
 
 func (l *Locker) SyncForever() {
 	go l.processLockRequestsForever()
-	go l.processReleaseLockRequestsForever()
+	go l.processUnlockRequestsForever()
 	go db.ExpireLeasesForever(l.dbc)
 
 	l.manageMutexesForever()
 }
 
-func (l *Locker) processReleaseLockRequestsForever() {
+func (l *Locker) processUnlockRequestsForever() {
 	for {
 		select {
 		case <-l.ctx.Done():
 			return
-		case leaseID := <-l.releaseLockRequests:
-			err := l.goku.ExpireLease(l.ctx, leaseID)
+		case mutex := <-l.unlockRequests:
+			err := l.goku.ExpireLease(l.ctx, mutex.getLeaseID())
 			if errors.Is(err, goku.ErrUpdateRace) {
-				l.releaseLockRequests <- leaseID
+				// more of a sanity check as this shouldn't happen unless 2 instances have the
+				// lock which should never happen.
+				l.unlockRequests <- mutex
+				continue
 			} else if errors.Is(err, goku.ErrLeaseNotFound) {
-				// continue
+				// in case of bad data so just move on. No need to do anything.
 				continue
 			} else if err != nil {
-				// log error and retry the request
+				// log error and allow for auto expire to release lock.
 				log.Error(l.ctx, err)
-				l.releaseLockRequests <- leaseID
 				continue
 			}
 		default:
@@ -100,22 +91,22 @@ func (l *Locker) processLockRequestsForever() {
 		select {
 		case <-l.ctx.Done():
 			return
-		case mutexUID := <-l.lockRequests:
-			mu, exists := l.pool[mutexUID]
-			if !exists {
-				continue
-			}
-
-			err := l.setLock(mu)
+		case mutex := <-l.lockRequests:
+			err := l.setLock(mutex)
 			if errors.IsAny(err, goku.ErrConditional, goku.ErrUpdateRace, ErrLeaseHasNotExpired) {
-				// retry
+				// default pattern, continue to try acquire the lock until successful
 				time.Sleep(time.Second)
-				fmt.Println("retry get lock")
-				mu.lockAcquireFailed <- struct{}{}
+				fmt.Println("retry acquire lock")
+				mutex.lockingFailed <- struct{}{}
+			} else if errors.IsAny(err, goku.ErrLeaseNotFound) {
+				// sanity check in case of bad data
+				mutex.resetLeaseID()
+				mutex.lockingFailed <- struct{}{}
 			} else if err != nil {
 				// log error and notify mutex of failed attempt
 				log.Error(l.ctx, err)
-				mu.lockAcquireFailed <- struct{}{}
+				time.Sleep(time.Second)
+				mutex.lockingFailed <- struct{}{}
 			}
 		default:
 			continue
@@ -137,30 +128,25 @@ func (l *Locker) manageMutexesForever() {
 
 func (l *Locker) consumerFunc() func(ctx context.Context, fate fate.Fate, event *reflex.Event) error {
 	return func(ctx context.Context, fate fate.Fate, event *reflex.Event) error {
-		id := l.parseReflexForeignID(event.ForeignID)
-		mutex, exists := l.pool[id]
-		if !exists {
-			// Must exist in another instance either in the same binary or another host
-			return nil
-		}
-
 		switch goku.EventType(event.Type.ReflexType()) {
 		case goku.EventTypeSet:
-			log.Info(l.ctx, "set")
-			kv, err := l.goku.Get(l.ctx, l.keyForMutex(mutex))
+			mutex, exists := l.pool[string(event.MetaData)]
+			if !exists {
+				// Must exist in another instance either in the same binary or another host
+				return nil
+			}
+
+			kv, err := l.goku.Get(l.ctx, event.ForeignID)
 			if errors.Is(err, goku.ErrNotFound) {
 				// continue
 			} else if err != nil {
 				return err
 			}
 
-			mutex.lockAcquired <- kv.LeaseID
-			return nil
-		case goku.EventTypeDelete:
-			mutex.lockFreed <- struct{}{}
-			return nil
-		case goku.EventTypeExpire:
-			mutex.lockFreed <- struct{}{}
+			// sanity check
+			if string(kv.Value) == mutex.instanceIdentifier {
+				mutex.locked <- kv.LeaseID
+			}
 			return nil
 		default:
 			// skip unknown events
@@ -190,24 +176,18 @@ func (l *Locker) setLock(mu *Mutex) error {
 		}
 	}
 
-	if !hasExpired && kv.LeaseID != 0 {
+	if !hasExpired && len(kv.Value) != 0 {
 		return ErrLeaseHasNotExpired
 	}
 
 	return l.goku.Set(
 		l.ctx,
 		key,
-		[]byte(nil),
+		[]byte(mu.instanceIdentifier),
 		goku.WithPrevVersion(kv.Version),
 		goku.WithExpiresAt(time.Now().Add(mu.autoExpireLockAfter)))
 }
 
 func (l *Locker) keyForMutex(mu *Mutex) string {
 	return "golocker/locks/" + l.name + "/" + mu.distributedIdentifier
-}
-
-func (l *Locker) parseReflexForeignID(foreignID string) string {
-	distributedIdentifier := l.name + "/"
-	segments := strings.Split(foreignID, distributedIdentifier)
-	return segments[1]
 }
