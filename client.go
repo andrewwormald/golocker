@@ -37,8 +37,8 @@ type Client struct {
 //
 // The Client can be passed around safely to create mutexes where needed. See NewLocker for more information on using
 // the golocker's Locker (distributed mutex).
-func New(ctx context.Context, globalName string, dbc *sql.DB, gcl goku.Client) *Client {
-	return &Client{
+func New(ctx context.Context, globalName string, dbc *sql.DB, gcl goku.Client, opts ...Option) *Client {
+	cl := &Client{
 		ctx:            ctx,
 		name:           globalName,
 		retryBackoff:   time.Microsecond * 100,
@@ -48,6 +48,28 @@ func New(ctx context.Context, globalName string, dbc *sql.DB, gcl goku.Client) *
 		pool:           make(map[string]*locker),
 		lockRequests:   make(chan *locker),
 		unlockRequests: make(chan *locker),
+	}
+
+	for _, opt := range opts {
+		opt(cl)
+	}
+
+	return cl
+}
+
+type Option func(cl *Client)
+
+// WithRetryBackoff configures the interval between when a Locker fails to obtain the lock and when it tries again.
+func WithRetryBackoff(retryBackoff time.Duration) Option {
+	return func(cl *Client) {
+		cl.retryBackoff = retryBackoff
+	}
+}
+
+// WithErrorBackoff configures the time it takes for the Locker to retry obtaining the lock after an unexpected error occurs.
+func WithErrorBackoff(errorBackoff time.Duration) Option {
+	return func(cl *Client) {
+		cl.errorBackoff = errorBackoff
 	}
 }
 

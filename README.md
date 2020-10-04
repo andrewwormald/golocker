@@ -23,4 +23,29 @@ func (c *Client) SyncForever()
 ```
 
 ## Locker
-#### Locker fulfills the `sync.Locker` interface. If two or more Lockers are created with the same global name and have access to the same database (even if they are produced from different Clients) they will attempt to obtain the same lock. Therefore they will be able to block one another (by one of them obtaining the lock) even on different hosts. 
+##### Locker fulfills the `sync.Locker` interface. If two or more Lockers are created with the same global name and have access to the same database (even if they are produced from different Clients) they will attempt to obtain the same lock. Therefore they will be able to block one another (by one of them obtaining the lock) even on different hosts. 
+
+##### `Lock` is a blocking call until the lock has been acquired.
+```golang
+func (l *locker) Lock()
+```
+
+##### `Unlock` unlocks the distributed locker
+```golang
+func (l *locker) Unlock()
+```
+
+## Options
+```golang
+type Option func(cl *Client)
+```
+
+##### `WithRetryBackoff` configures the interval between when a Locker fails to obtain the lock and when it tries again.
+```golang
+func WithRetryBackoff(retryBackoff time.Duration) Option
+```
+
+##### `WithErrorBackoff` configures the time it takes for the Locker to retry obtaining the lock after an unexpected error occurs.
+```golang
+func WithErrorBackoff(errorBackoff time.Duration) Option
+```
