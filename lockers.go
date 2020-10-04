@@ -167,7 +167,6 @@ func (l *Locker) setLock(mu *Mutex) error {
 	}
 
 	if len(kv.Value) != 0 {
-		fmt.Println("lease not expired")
 		return ErrLeaseHasNotExpired
 	}
 
