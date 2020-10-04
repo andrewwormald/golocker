@@ -31,12 +31,12 @@ type Client struct {
 	unlockRequests chan *locker
 }
 
-// New returns a new golocker Client type that can create a distributed locker and synchronise with other mutexes on
-// different goroutines or binaries. Only one locker per binary is needed as it can create multiple distributed mutexes
+// New returns a new golocker Client type that can create a locker (distributed mutex) and synchronise with other lockers
+// on different goroutines or binaries. Only one Client per binary is needed as it can create multiple distributed mutexes
 // that synchronise their locking with one another.
 //
-// The Client can be passed around safely to create mutexes where needed. See NewMutex for more information on using
-// the golocker Mutex.
+// The Client can be passed around safely to create mutexes where needed. See NewLocker for more information on using
+// the golocker's Locker (distributed mutex).
 func New(ctx context.Context, globalName string, dbc *sql.DB, gcl goku.Client) *Client {
 	return &Client{
 		ctx:            ctx,
