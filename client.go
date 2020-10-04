@@ -65,7 +65,7 @@ func (c *Client) NewLocker(globalName string, autoExpireLockAfter time.Duration)
 	return lckr
 }
 
-// SyncForever must be called in order for the lockers to Lock and Unlock.
+// SyncForever enables the lockers to work as distributed mutexes. SyncForever is a blocking call.
 //
 // SyncForever handles the filling or reflex event gaps, forever expiring goku leases, and synchronising the lockers'
 // locks and unlocks.
