@@ -31,6 +31,8 @@ type Locker struct {
 }
 
 func New(ctx context.Context, globalName string, dbc *sql.DB, gcl goku.Client) *Locker {
+	db.FillGaps(dbc)
+
 	return &Locker{
 		ctx:            ctx,
 		name:           globalName,

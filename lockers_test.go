@@ -62,7 +62,6 @@ func TestRun(t *testing.T) {
 
 	cl := logical.New(dbc, dbc)
 	instanceLocker := golocker.New(ctx, "leader_election", dbc, cl)
-	db.FillGaps(dbc)
 	go instanceLocker.SyncForever()
 
 	m := instanceLocker.NewMutex("isLeader", time.Second * 6)
