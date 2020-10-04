@@ -115,7 +115,7 @@ func (c *Client) processLockRequestsForever() {
 			return
 		case lckr := <-c.lockRequests:
 			err := c.setLock(lckr)
-			if errors.IsAny(err, goku.ErrConditional, goku.ErrUpdateRace, ErrLeaseHasNotExpired) {
+			if errors.IsAny(err, goku.ErrConditional, goku.ErrUpdateRace, errLeaseHasNotExpired) {
 				// default pattern, continue to try acquire the lock until successful
 				lckr.lockingFailed <- c.retryBackoff
 			} else if err != nil {
@@ -170,6 +170,8 @@ func (c *Client) consumerFunc() func(ctx context.Context, fate fate.Fate, event 
 	}
 }
 
+var errLeaseHasNotExpired = errors.New("lease has not expired yet")
+
 func (c *Client) setLock(mu *locker) error {
 	key := c.keyForMutex(mu)
 	kv, err := c.goku.Get(c.ctx, key)
@@ -180,7 +182,7 @@ func (c *Client) setLock(mu *locker) error {
 	}
 
 	if len(kv.Value) != 0 {
-		return ErrLeaseHasNotExpired
+		return errLeaseHasNotExpired
 	}
 
 	return c.goku.Set(
