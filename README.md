@@ -8,7 +8,7 @@
 
 ##### The `Client` can be passed around safely to create mutexes where needed. See NewLocker for more information on using the golocker's Locker (distributed mutex).
 ```golang
-func New(ctx context.Context, globalName string, dbc *sql.DB, gcl goku.Client) *Client
+func New(ctx context.Context, dbc *sql.DB, gcl goku.Client, opts ...Option) *Client 
 ``` 
 
 ##### `NewLocker` returns a sync.Locker complaint distributed mutex. In order for lockers to sync their locking, provide the same globalName to the NewMutex method. If a different name is given, then it is a different distributed mutex.

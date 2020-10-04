@@ -3,6 +3,7 @@ package golocker
 import (
 	"context"
 	"database/sql"
+	"github.com/pborman/uuid"
 	"sync"
 	"time"
 
@@ -16,13 +17,12 @@ import (
 )
 
 type Client struct {
-	ctx          context.Context
-	name         string
-	retryBackoff time.Duration
-	errorBackoff time.Duration
-
+	ctx  context.Context
 	dbc  *sql.DB
 	goku goku.Client
+
+	retryBackoff time.Duration
+	errorBackoff time.Duration
 
 	mu   sync.Mutex
 	pool map[string]*locker
@@ -37,10 +37,9 @@ type Client struct {
 //
 // The Client can be passed around safely to create mutexes where needed. See NewLocker for more information on using
 // the golocker's Locker (distributed mutex).
-func New(ctx context.Context, globalName string, dbc *sql.DB, gcl goku.Client, opts ...Option) *Client {
+func New(ctx context.Context, dbc *sql.DB, gcl goku.Client, opts ...Option) *Client {
 	cl := &Client{
 		ctx:            ctx,
-		name:           globalName,
 		retryBackoff:   time.Microsecond * 100,
 		errorBackoff:   time.Second * 10,
 		dbc:            dbc,
@@ -152,8 +151,8 @@ func (c *Client) processLockRequestsForever() {
 }
 
 func (c *Client) manageMutexesForever() {
-	streamFunc := c.goku.Stream("golocker/locks/" + c.name)
-	consumer := reflex.NewConsumer(c.name, c.consumerFunc())
+	streamFunc := c.goku.Stream("golocker/locks/")
+	consumer := reflex.NewConsumer("golocker" + uuid.New(), c.consumerFunc())
 	spec := reflex.NewSpec(streamFunc, rpatterns.MemCursorStore(), consumer, reflex.WithStreamFromHead())
 	rpatterns.RunForever(
 		func() context.Context {
@@ -216,5 +215,5 @@ func (c *Client) setLock(mu *locker) error {
 }
 
 func (c *Client) keyForMutex(mu *locker) string {
-	return "golocker/locks/" + c.name + "/" + mu.distributedIdentifier
+	return "golocker/locks/" + mu.distributedIdentifier
 }
