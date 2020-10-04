@@ -1,5 +1,7 @@
 # golocker
 
+###### An example of how to use golocker can be found here: https://github.com/andrewwormald/example-golocker
+
 ## Client
 
 ##### `New` returns a new golocker Client type that can create a locker (distributed mutex) and synchronise with other lockers on different goroutines or binaries. Only one Client per binary is needed as it can create multiple distributed mutexes that synchronise their locking with one another.
