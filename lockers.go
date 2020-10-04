@@ -166,19 +166,8 @@ func (l *Locker) setLock(mu *Mutex) error {
 		return err
 	}
 
-	leases, err := db.ListLeasesToExpire(l.ctx, l.dbc, time.Now())
-	if err != nil {
-		return err
-	}
-
-	var hasExpired bool
-	for _, lease := range leases {
-		if lease.ID == kv.LeaseID {
-			hasExpired = true
-		}
-	}
-
-	if !hasExpired && len(kv.Value) != 0 {
+	if len(kv.Value) != 0 {
+		fmt.Println("lease not expired")
 		return ErrLeaseHasNotExpired
 	}
 
