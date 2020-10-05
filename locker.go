@@ -22,6 +22,7 @@ type locker struct {
 	locked        chan int64 // lease id returned once lock acquired
 	lockingFailed chan time.Duration
 	unlocked      chan time.Duration
+	unlockFailed  chan time.Duration
 
 	autoExpireLockAfter time.Duration
 
@@ -38,6 +39,7 @@ func newLocker(ctx context.Context, distributedIdentifier string, autoExpireLock
 		locked:                make(chan int64),
 		lockingFailed:         make(chan time.Duration),
 		unlocked:              make(chan time.Duration),
+		unlockFailed:          make(chan time.Duration),
 		autoExpireLockAfter:   autoExpireLockAfter,
 		requestLock:           lockRequests,
 		requestUnlock:         unlockRequests,
@@ -81,16 +83,21 @@ func (l *locker) Unlock() {
 
 	l.requestUnlock <- l
 
-	select {
-	case <- l.ctx.Done():
-		return
-	case backoff := <- l.unlocked:
-		l.mu.Lock()
-		l.hasLock = false
-		l.mu.Unlock()
+	for {
+		select {
+		case <-l.ctx.Done():
+			return
+		case backoff := <-l.unlocked:
+			l.mu.Lock()
+			l.hasLock = false
+			l.mu.Unlock()
 
-		// unlock successful, backoff to allow fair chance for the waiting lockers
-		time.Sleep(backoff)
+			// unlock successful, backoff to allow fair chance for the waiting lockers
+			time.Sleep(backoff)
+			return
+		case <-l.unlockFailed:
+			l.requestUnlock <- l
+		}
 	}
 }
 

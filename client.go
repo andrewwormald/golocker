@@ -113,7 +113,7 @@ func (c *Client) processUnlockRequestsForever() {
 				c.unlockRequests <- lckr
 				continue
 			} else if errors.Is(err, goku.ErrLeaseNotFound) {
-				// in case of bad data so just move on. No need to do anything.
+				// can consider successful release
 			} else if err != nil {
 				// log error, backoff, and retry
 				log.Error(c.ctx, err)
