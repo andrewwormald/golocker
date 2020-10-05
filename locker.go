@@ -2,9 +2,10 @@ package golocker
 
 import (
 	"context"
-	"github.com/pborman/uuid"
 	"sync"
 	"time"
+
+	"github.com/pborman/uuid"
 )
 
 // locker is a distributed mutex that is managed by the golocker Client.

@@ -28,7 +28,7 @@ func TestLocker(t *testing.T) {
 	var wg sync.WaitGroup
 	wg.Add(2000)
 
-	mu := locker.NewLocker("is_leader", time.Minute * 2)
+	mu := locker.NewLocker("is_leader", time.Minute*2)
 	for i := 0; i < 2000; i++ {
 		go func(iteration string) {
 			mu.Lock()

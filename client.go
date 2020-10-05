@@ -3,7 +3,6 @@ package golocker
 import (
 	"context"
 	"database/sql"
-	"github.com/pborman/uuid"
 	"sync"
 	"time"
 
@@ -14,6 +13,7 @@ import (
 	"github.com/luno/jettison/log"
 	"github.com/luno/reflex"
 	"github.com/luno/reflex/rpatterns"
+	"github.com/pborman/uuid"
 )
 
 type Client struct {
@@ -154,7 +154,7 @@ func (c *Client) processLockRequestsForever() {
 
 func (c *Client) manageMutexesForever() {
 	streamFunc := c.goku.Stream("golocker/locks/")
-	consumer := reflex.NewConsumer("golocker" + uuid.New(), c.consumerFunc())
+	consumer := reflex.NewConsumer("golocker"+uuid.New(), c.consumerFunc())
 	spec := reflex.NewSpec(streamFunc, rpatterns.MemCursorStore(), consumer, reflex.WithStreamFromHead())
 	rpatterns.RunForever(
 		func() context.Context {
