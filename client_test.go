@@ -21,7 +21,7 @@ func TestLocker(t *testing.T) {
 	dbc := db.ConnectForTesting(t)
 	cl := logical.New(dbc, dbc)
 
-	locker := golocker.New(ctx, "leader_election", dbc, cl)
+	locker := golocker.New(ctx, dbc, cl)
 	go locker.SyncForever()
 
 	var testVariable string
