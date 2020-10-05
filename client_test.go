@@ -2,6 +2,7 @@ package golocker_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strconv"
 	"sync"
@@ -42,3 +43,35 @@ func TestLocker(t *testing.T) {
 	wg.Wait()
 }
 
+func TestBin(t *testing.T) {
+	ctx := context.Background()
+	dbc, err := sql.Open("mysql", "golocker:@tcp(127.0.0.1:3306)/golocker?parseTime=true")
+	if err != nil {
+		panic(err)
+	}
+
+	err = dbc.Ping()
+	if err != nil {
+		panic(err)
+	}
+
+	dbc.SetMaxOpenConns(10)
+	dbc.SetMaxIdleConns(5)
+	dbc.SetConnMaxLifetime(time.Second * 10)
+
+	cl := logical.New(dbc, dbc)
+	client := golocker.New(ctx, dbc, cl)
+	go client.SyncForever()
+
+	m := client.NewLocker("isLeader", time.Second * 10)
+
+	// this can be run in a for loop to switch between instances forever
+	for {
+		fmt.Println("waiting")
+		m.Lock()
+		time.Sleep(time.Second * 5)
+		fmt.Println("locked")
+		m.Unlock()
+		fmt.Println("unlocked")
+	}
+}
