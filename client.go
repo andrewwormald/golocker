@@ -115,6 +115,7 @@ func (c *Client) processUnlockRequestsForever() {
 			} else if errors.Is(err, goku.ErrLeaseNotFound) {
 				// in case of bad data so just move on. No need to do anything.
 				fmt.Print("lease not found")
+				log.Error(c.ctx, err)
 				continue
 			} else if err != nil {
 				// log error, backoff, and retry
