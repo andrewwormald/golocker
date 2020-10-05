@@ -108,19 +108,19 @@ func (c *Client) processUnlockRequestsForever() {
 			err := c.goku.ExpireLease(c.ctx, lckr.getLeaseID())
 			if errors.Is(err, goku.ErrUpdateRace) {
 				// more of a sanity check as this shouldn't ever happen
-				c.unlockRequests <- lckr
+				lckr.unlockFailed <- c.retryBackoff
 				continue
 			} else if errors.Is(err, goku.ErrLeaseNotFound) {
 				// can consider successful release
 				log.Error(c.ctx, err)
+				lckr.unlocked <- c.retryBackoff
+				continue
 			} else if err != nil {
 				// log error, backoff, and retry
 				log.Error(c.ctx, err)
 				time.Sleep(c.errorBackoff)
 
-				// one locker will have the lock and thus safe to pass the locker back into the channel without
-				// it becoming blocked
-				c.unlockRequests <- lckr
+				lckr.unlockFailed <- c.errorBackoff
 				continue
 			}
 
